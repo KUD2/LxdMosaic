@@ -5,6 +5,7 @@ module.exports = class Terminals {
   constructor(rp) {
     this.rp = rp;
     this.activeTerminals = {};
+    this.activeConsoles = {};
     this.internalUuidMap = {};
   }
 
@@ -24,6 +25,23 @@ module.exports = class Terminals {
     }
 
     this.activeTerminals[internalUuid].send(
+      msg,
+      {
+        binary: true,
+      },
+      () => {}
+    );
+  }
+
+  sendToConsole(internalUuid, msg) {
+    if (this.activeConsoles[internalUuid] == undefined) {
+        console.log("return");
+        return;
+    }
+        // const buf = Buffer.from(msg);
+        // msg = buf.toString();
+        // console.log();
+    this.activeConsoles[internalUuid].send(
       msg,
       {
         binary: true,
@@ -124,10 +142,102 @@ module.exports = class Terminals {
     });
   }
 
+  createSpiceConsoleIfReq(
+    socket,
+    hosts,
+    host,
+    container,
+    internalUuid = null
+  ) {
+    return new Promise((resolve, reject) => {
+      // if (this.activeConsoles[internalUuid] !== undefined) {
+      //   this.activeConsoles[internalUuid].on('error', error =>
+      //     console.log(error)
+      //   );
+      //
+      //   this.activeConsoles[internalUuid].on('message', data => {
+      //     socket.emit('message', data);
+      //   });
+      //   this.sendToTerminal(internalUuid, '\n');
+      //   resolve(true);
+      //   return;
+      // }
+
+      let hostDetails = hosts[host];
+
+      this.openLxdConsole(hostDetails, container)
+        .then(openResult => {
+
+          let url = `wss://${hostDetails.hostWithOutProtoOrPort}:${hostDetails.port}`;
+
+          // If the server dies but there are active clients they will re-connect
+          // with their process-id but it wont be in the internalUuidMap
+          // so we need to re add it
+          if (!this.internalUuidMap.hasOwnProperty(`${host}.${container}`)) {
+            this.internalUuidMap[`${host}.${container}`] = internalUuid;
+          }
+
+          const wsoptions = {
+            cert: hostDetails.cert,
+            key: hostDetails.key,
+            rejectUnauthorized: false,
+            binaryType: "arraybuffer"
+          };
+
+          const lxdWs = new WebSocket(
+            url +
+              openResult.operation +
+              '/websocket?secret=' +
+              openResult.metadata.metadata.fds['0'],
+            wsoptions
+          );
+
+          console.log(lxdWs);
+
+          // console.log(lxdWs);
+
+          lxdWs.on('error', error => console.log(error));
+
+          lxdWs.on('message', data => {
+
+              // console.log(typeof msg);
+             console.log(data);
+              socket.emit('message', {data: data});
+          });
+
+          this.activeConsoles[internalUuid] = lxdWs;
+          resolve(true);
+        })
+        .catch((e) => {
+            console.log(e);
+          reject();
+        });
+    });
+  }
+
   openLxdOperation(hostDetails, container, shell) {
     let execOptions = this.createExecOptions(hostDetails, container);
 
     execOptions.body = this.getExecBody(shell);
+
+    return this.rp(execOptions);
+  }
+
+  openLxdConsole(hostDetails, container) {
+    let url = hostDetails.supportsVms ? 'instances' : 'containers';
+    let execOptions = {
+      method: 'POST',
+      uri: `https://${hostDetails.hostWithOutProtoOrPort}:${hostDetails.port}/1.0/${url}/${container}/console`,
+      cert: hostDetails.cert,
+      key: hostDetails.key,
+      rejectUnauthorized: false,
+      json: true,
+      body: {
+          "width": 0,
+    	  "height": 0,
+    	  "type": "vga"
+      }
+    }
 
     return this.rp(execOptions);
   }

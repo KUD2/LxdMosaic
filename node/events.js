@@ -93,7 +93,7 @@ var httpsServer = https.createServer(
   app
 );
 
-var io = require('socket.io')(httpsServer);
+var io = require('socket.io')(httpsServer, { origins: '*:*'});
 
 var operationSocket = io.of('/operations');
 
@@ -185,6 +185,36 @@ terminalsIo.on('connect', function(socket) {
     });
 });
 
+var consoleIos = io.of('/consoles');
+
+consoleIos.on('connect', function(socket) {
+  // let host = socket.handshake.query.hostId,
+  //   container = socket.handshake.query.container,
+  //   uuid = socket.handshake.query.pid;
+
+  let host = 13;
+  let container = "ubuntu";
+  let uuid = null;
+
+
+  terminals
+    .createSpiceConsoleIfReq(socket, hosts.getHosts(), host, container, uuid)
+    .then(() => {
+      //NOTE When user inputs from browser
+      socket.on('data', function(msg) {
+          terminals.sendToConsole(uuid, msg);
+      });
+
+      socket.on('close', function(uuid) {
+        terminals.close(uuid);
+      });
+    })
+    .catch(() => {
+      // Prevent the browser re-trying (this maybe can be changed later)
+      socket.disconnect();
+    });
+});
+
 
 
 if(!usingSqllite){
@@ -215,7 +245,7 @@ if(!usingSqllite){
 }
 
 
-
+//
 io.use(async (socket, next) => {
   let token = socket.handshake.query.ws_token;
   let userId = socket.handshake.query.user_id;

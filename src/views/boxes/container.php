@@ -1,3 +1,154 @@
+<!-- ES2015/ES6 modules polyfill -->
+<script type="module">
+    window._spice_has_module_support = true;
+</script>
+<script>
+    window.addEventListener("load", function() {
+        if (window._spice_has_module_support) return;
+        var loader = document.createElement("script");
+        loader.src = "/assets/spiceHtml5/src/thirdparty/browser-es-module-loader/dist/browser-es-module-loader.js";
+        document.head.appendChild(loader);
+    });
+</script>
+
+<script type="module" crossorigin="anonymous">
+    import * as SpiceHtml5 from './assets/spiceHtml5/src/main.js';
+
+    var host = null, port = null;
+    var sc;
+
+    function spice_set_cookie(name, value, days) {
+        var date, expires;
+        date = new Date();
+        date.setTime(date.getTime() + (days*24*60*60*1000));
+        expires = "; expires=" + date.toGMTString();
+        document.cookie = name + "=" + value + expires + "; path=/";
+    };
+
+    function spice_query_var(name, defvalue) {
+        var match = RegExp('[?&]' + name + '=([^&]*)')
+                          .exec(window.location.search);
+        return match ?
+            decodeURIComponent(match[1].replace(/\+/g, ' '))
+            : defvalue;
+    }
+
+    function spice_error(e)
+    {
+        disconnect();
+        if (e !== undefined && e.message === "Permission denied.") {
+          var pass = prompt("Password");
+          connect(pass);
+        }
+    }
+
+    function connectToTerminal(uri, password = undefined)
+    {
+        var host, port, scheme = "ws://";
+
+        // By default, use the host and port of server that served this file
+        host = spice_query_var('host', window.location.hostname);
+
+        // Note that using the web server port only makes sense
+        //  if your web server has a reverse proxy to relay the WebSocket
+        //  traffic to the correct destination port.
+        var default_port = window.location.port;
+        if (!default_port) {
+            if (window.location.protocol == 'http:') {
+                default_port = 80;
+            }
+            else if (window.location.protocol == 'https:') {
+                default_port = 443;
+            }
+        }
+        port = spice_query_var('port', default_port);
+        if (window.location.protocol == 'https:') {
+            scheme = "wss://";
+        }
+
+        // If a token variable is passed in, set the parameter in a cookie.
+        // This is used by nova-spiceproxy.
+        var token = spice_query_var('token', null);
+        if (token) {
+            spice_set_cookie('token', token, 1)
+        }
+
+        if (password === undefined) {
+            password = spice_query_var('password', '');
+        }
+        var path = spice_query_var('path', 'websockify');
+
+        if ((!host) || (!port)) {
+            console.log("must specify host and port in URL");
+            return;
+        }
+
+        if (sc) {
+            sc.stop();
+        }
+
+        // uri = scheme + host + ":" + port;
+        //
+        // if (path) {
+        //   uri += path[0] == '/' ? path : ('/' + path);
+        // }
+        //NOTE Over ride the url when debbuging to see whats going on
+        uri = ""
+        try
+        {
+            sc = new SpiceHtml5.SpiceMainConn({uri: uri, screen_id: "spice-screen", dump_id: "debug-div",
+                        message_id: "message-div", password: password, onerror: spice_error, onagent: agent_connected });
+        }
+        catch (e)
+        {
+            alert(e.toString());
+            disconnect();
+        }
+
+    }
+
+    function disconnect()
+    {
+        console.log(">> disconnect");
+        if (sc) {
+            sc.stop();
+        }
+        if (window.File && window.FileReader && window.FileList && window.Blob)
+        {
+            var spice_xfer_area = document.getElementById('spice-xfer-area');
+            if (spice_xfer_area != null) {
+              document.getElementById('spice-area').removeChild(spice_xfer_area);
+            }
+            document.getElementById('spice-area').removeEventListener('dragover', SpiceHtml5.handle_file_dragover, false);
+            document.getElementById('spice-area').removeEventListener('drop', SpiceHtml5.handle_file_drop, false);
+        }
+        console.log("<< disconnect");
+    }
+
+    function agent_connected(sc)
+    {
+        window.addEventListener('resize', SpiceHtml5.handle_resize);
+        window.spice_connection = this;
+
+        SpiceHtml5.resize_helper(this);
+
+        if (window.File && window.FileReader && window.FileList && window.Blob)
+        {
+            var spice_xfer_area = document.createElement("div");
+            spice_xfer_area.setAttribute('id', 'spice-xfer-area');
+            document.getElementById('spice-area').appendChild(spice_xfer_area);
+            document.getElementById('spice-area').addEventListener('dragover', SpiceHtml5.handle_file_dragover, false);
+            document.getElementById('spice-area').addEventListener('drop', SpiceHtml5.handle_file_drop, false);
+        }
+        else
+        {
+            console.log("File API is not supported");
+        }
+    }
+
+    window.connectToTerminal = connectToTerminal
+</script>
+
 <div id="containerBox" class="boxSlide">
     <div class="row border-bottom mb-2">
     <div class="col-md-12 text-center">
@@ -64,6 +215,9 @@
             </button>
             <button type="button" class="btn text-white btn-outline-primary" id="goToConsole">
                 <i class="fas fa-terminal pr-2"></i>Console
+            </button>
+            <button type="button" class="btn text-white btn-outline-primary" id="goToTerminal">
+                <i class="fas fa-tv pr-2"></i>Terminal
             </button>
             <button type="button" class="btn text-white btn-outline-primary" id="goToBackups">
                 <i class="fas fa-save pr-2"></i>Backups
@@ -164,6 +318,16 @@
 </div>
 <div id="containerConsole">
     <div id="terminal-container"></div>
+</div>
+<div id="containerTerminal">
+
+    <div id="spice-area">
+        <div id="spice-screen" class="spice-screen"></div>
+    </div>
+
+    <div id="message-div" class="spice-message"></div>
+
+    <div id="debug-div"></div>
 </div>
 <div id="containerBackups">
     <div class="row" id="backupErrorRow">
@@ -1408,6 +1572,16 @@ $("#containerBox").on("click", "#goToEvents", function() {
 
         $("#containerEventsTable > tbody").empty().append(trs);
     });
+});
+
+$("#containerBox").on("click", "#goToTerminal", function() {
+    $("#containerDetails, #containerBackups, #containerFiles, #containerMetrics, #containerEvents, #containerConsole").hide();
+    $("#containerTerminal").show();
+    ajaxRequest(globalUrls.instances.console.startSpiceConsole, currentContainerDetails, (data)=>{
+        data = makeToastr(data);
+        window.connectToTerminal(data.url);
+    });
+
 });
 
 $("#containerBox").on("click", "#goToConsole", function() {
